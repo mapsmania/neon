@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Neon Neighborhood</title>
+    <style>
+        body { margin: 0; background: #020205; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        #ui { 
+            position: absolute; top: 20px; left: 20px; 
+            color: #00ffff; pointer-events: none; 
+            text-transform: uppercase; letter-spacing: 2px;
+            text-shadow: 0 0 10px #00ffff;
+        }
+        #loading {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00ffff; font-size: 1.2rem;
+            text-transform: uppercase; letter-spacing: 4px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui">Localized 3D Network</div>
+    <div id="loading">Requesting Location...</div>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://esm.sh/three@0.160.0",
+                "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 5000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        camera.position.set(0, 500, 500);
+
+        let droneActive = false;
+        let currentTarget = new THREE.Vector3(0, 50, 0);
+        let bounds = { minX: -50, maxX: 50, minZ: -50, maxZ: 50 };
+
+        const roadMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x00f3ff, emissive: 0x0066ff, emissiveIntensity: 5 
+        });
+
+        const buildingMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x111122, emissive: 0x050510, transparent: true, opacity: 0.8, metalness: 0.9, roughness: 0.1 
+        });
+
+        function project(lon, lat, centerLon, centerLat) {
+            const x = (lon - centerLon) * 111320 * Math.cos(centerLat * Math.PI / 180);
+            const z = (lat - centerLat) * 110540 * -1;
+            return { x, z };
+        }
+
+        function getRandomTarget() {
+            return new THREE.Vector3(
+                Math.random() * (bounds.maxX - bounds.minX) + bounds.minX,
+                Math.random() * 40 + 30, 
+                Math.random() * (bounds.maxZ - bounds.minZ) + bounds.minZ
+            );
+        }
+
+        // --- Geolocation Logic ---
+        function init() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => loadMap(pos.coords.latitude, pos.coords.longitude),
+                    () => {
+                        console.warn("Location denied. Defaulting to London.");
+                        loadMap(51.507, -0.127); // Default London
+                    }
+                );
+            } else {
+                loadMap(51.507, -0.127);
+            }
+        }
+
+        async function loadMap(lat, lon) {
+    const loadingEl = document.getElementById('loading');
+    loadingEl.style.display = 'block';
+    loadingEl.innerHTML = "Downloading Local Data...<br><span style='font-size:10px; opacity:0.6;'>Interrogating OpenStreetMap</span>";
+    
+    const offset = 0.005; 
+    const bbox = `${lat - offset},${lon - offset},${lat + offset},${lon + offset}`;
+    
+    const query = `[out:json][timeout:25];(way["highway"](${bbox});way["building"](${bbox}););out body;>;out skel qt;`;
+    const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+
+    try {
+        const response = await fetch(url);
+
+        // --- Error Handling Block ---
+        if (!response.ok) {
+            if (response.status === 405) {
+                throw new Error("Overpass Server Error (405): Method Not Allowed. The server might be restricted.");
+            } else if (response.status === 429) {
+                throw new Error("Too many requests! The map server is throttling us. Wait a moment.");
+            } else if (response.status === 504 || response.status === 408) {
+                throw new Error("Server Timeout: This area is too complex to load quickly.");
+            } else {
+                throw new Error(`Map Error: ${response.status} - ${response.statusText}`);
+            }
+        }
+
+        const data = await response.json();
+
+        if (!data.elements || data.elements.length === 0) {
+            loadingEl.innerHTML = "No 3D data found here.<br><button onclick='location.reload()' style='pointer-events:auto; margin-top:10px;'>Try London instead?</button>";
+            return;
+        }
+
+        const nodes = {};
+        data.elements.filter(e => e.type === 'node').forEach(n => {
+            nodes[n.id] = { lat: n.lat, lon: n.lon };
+        });
+
+        const ways = data.elements.filter(e => e.type === 'way');
+        const centerNode = { lat, lon };
+
+        ways.forEach(way => {
+            const points = way.nodes.map(id => nodes[id]).filter(n => n);
+            if (points.length < 2) return;
+
+            const projectedPoints = points.map(n => {
+                const pos = project(n.lon, n.lat, centerNode.lon, centerNode.lat);
+                if (pos.x < bounds.minX) bounds.minX = pos.x;
+                if (pos.x > bounds.maxX) bounds.maxX = pos.x;
+                if (pos.z < bounds.minZ) bounds.minZ = pos.z;
+                if (pos.z > bounds.maxZ) bounds.maxZ = pos.z;
+                return new THREE.Vector2(pos.x, pos.z);
+            });
+
+            if (way.tags.building) {
+                const shape = new THREE.Shape(projectedPoints);
+                const height = (way.tags["building:levels"] || 2) * 4;
+                const geometry = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+                const mesh = new THREE.Mesh(geometry, buildingMaterial);
+                
+                const edges = new THREE.EdgesGeometry(geometry);
+                const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x0088ff }));
+                mesh.add(line);
+
+                mesh.rotation.x = Math.PI / 2;
+                mesh.position.y = height;
+                scene.add(mesh);
+            } else {
+                const v3Points = projectedPoints.map(p => new THREE.Vector3(p.x, 0, p.y));
+                const curve = new THREE.CatmullRomCurve3(v3Points);
+                const radius = (way.tags.highway === 'primary') ? 1.5 : 0.5;
+                scene.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 20, radius, 8, false), roadMaterial));
+            }
+        });
+
+        currentTarget = getRandomTarget();
+        droneActive = true;
+        loadingEl.style.display = 'none';
+
+    } catch (err) {
+        console.error(err);
+        // Display the error to the user in the loading div
+        loadingEl.innerHTML = `
+            <div style="color: #ff4444; background: rgba(0,0,0,0.8); padding: 20px; border: 1px solid #ff4444;">
+                <strong>MAP LOAD FAILED</strong><br>
+                ${err.message}<br>
+                <button onclick="location.reload()" style="pointer-events:auto; margin-top:15px; background:#ff4444; color:white; border:none; padding:10px; cursor:pointer;">
+                    Retry / Use Default Location
+                </button>
+            </div>
+        `;
+    }
+}
+        // Lighting
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        const grid = new THREE.GridHelper(2000, 50, 0x111122, 0x111122);
+        grid.position.y = -1;
+        scene.add(grid);
+
+        const lookTarget = new THREE.Vector3(0,0,0);
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (droneActive) {
+                camera.position.lerp(currentTarget, 0.005);
+                camera.lookAt(lookTarget);
+                if (camera.position.distanceTo(currentTarget) < 30) {
+                    currentTarget = getRandomTarget();
+                }
+            } else {
+                controls.update();
+            }
+
+            roadMaterial.emissiveIntensity = 4 + Math.sin(Date.now() * 0.002) * 2;
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        init();
+        animate();
+    </script>
+</body>
+</html>
