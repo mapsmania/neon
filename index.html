@@ -421,15 +421,19 @@ if (viewMode === 'car') {
 
                     b.userData.found=true;
 
+                    // 1. Change the wireframe outline to bright green
                     b.userData.targetOutline.material.color.set(0x00ff00);
 
-                    b.material.emissive=new THREE.Color(0x003300);
-                    b.material.emissiveIntensity=2;
+                    // 2. Change the ACTUAL building color to solid green
+                    b.material.color.set(0x00ff00); 
+                    
+                    // 3. Make it glow green as well
+                    b.material.emissive = new THREE.Color(0x00ff00);
+                    b.material.emissiveIntensity = 1;
 
                     // 🔥 Reward: Increase blimp speed by 10%
                     blimpSpeed *= 1.1;
-                    blimpSpeed = Math.min(blimpSpeed, 10); // max speed 10x default
-
+                    blimpSpeed = Math.min(blimpSpeed, 10); 
 
                     const found=targetBuildings.filter(t=>t.userData.found).length;
 
@@ -437,7 +441,7 @@ if (viewMode === 'car') {
                         `Targets Found: ${found} / ${targetBuildings.length}`;
 
                     if(found===targetBuildings.length){
-                        setTimeout(()=>alert("All targets located!"),200);
+                        setTimeout(()=>alert("All targets located! Grid Secured."),200);
                     }
                 }
             });
