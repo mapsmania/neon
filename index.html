@@ -81,27 +81,29 @@ button:hover { background: rgba(0,255,255,0.4); }
     flex-direction: column;
     align-items: center; 
     justify-content: flex-start;
-    padding-top: 10vh;
+    padding: 10vh 20px 40px 20px; /* Added bottom padding */
     z-index: 100; 
     box-sizing: border-box; 
     border: 10px solid #00ff00;
     pointer-events: auto;
-    gap: 20px; /* This creates the gap between ALL elements (h1, p, search, button) */
+    gap: 20px;
+    overflow-y: auto; /* Allows the WHOLE overlay to scroll if results are long */
 }
 
 #searchWrapper {
-    width: 90%;
+    width: 100%;
     max-width: 500px;
-    position: relative; /* Absolute children like the icon will now stay inside here */
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
+    flex-shrink: 0; /* Prevents the search box from squishing */
 }
 
 #searchIcon {
     position: absolute;
     left: 15px;
-    top: 25px; /* Centers it vertically relative to the input height */
+    top: 15px; /* Adjusted to match new padding */
     font-size: 1.2rem;
     color: #00ff00;
     z-index: 2;
@@ -110,7 +112,7 @@ button:hover { background: rgba(0,255,255,0.4); }
 
 #search {
     width: 100%;
-    padding: 15px 15px 15px 45px; /* Added 45px left padding to make room for icon */
+    padding: 15px 15px 15px 45px;
     font-size: 1.2rem;
     border: 2px solid #00ff00;
     background: #000;
@@ -119,27 +121,53 @@ button:hover { background: rgba(0,255,255,0.4); }
     font-family: 'Segoe UI', sans-serif;
     outline: none;
     box-shadow: 0 0 15px rgba(0, 255, 0, 0.3);
-    box-sizing: border-box; /* Crucial for padding to work correctly */
+    box-sizing: border-box;
 }
 
 #results {
     width: 100%;
-    background: rgba(0, 10, 0, 0.98);
+    background: #ffffff; /* Pure white for maximum contrast */
     border: 2px solid #00ff00;
     border-top: none;
     max-height: 250px;
     overflow-y: auto;
-    position: absolute;
-    top: 100%; 
+    position: relative; 
     z-index: 101;
     box-sizing: border-box;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.5); /* Adds depth */
 }
 
-/* Ensure the button has its own margin just in case */
-#overlay button {
-    margin-top: 20px;
+.result {
+    padding: 12px 15px;
+    color: #000000; /* Black text on white background */
+    border-bottom: 1px solid #dddddd;
+    cursor: pointer;
+    text-align: left;
+    font-size: 0.95rem;
+    font-weight: 500;
+    text-transform: none; /* Keeps city names readable (e.g., London, not LONDON) */
 }
 
+.result:hover {
+    background: #e0ffe0; /* Very light green tint on hover */
+    color: #006600;      /* Darker green text when hovering */
+}
+
+/* Custom Scrollbar for the white results box */
+#results::-webkit-scrollbar {
+    width: 8px;
+}
+#results::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+#results::-webkit-scrollbar-thumb {
+    background: #00ff00;
+}
+    #overlay button {
+    margin-top: 10px;
+    flex-shrink: 0; /* Keeps the button from shrinking */
+    padding: 15px 40px; /* Matches your previous button size */
+}    
 </style>
 </head>
 
@@ -228,6 +256,22 @@ searchInput.addEventListener('input', (e) => {
         renderResults(features);
     }, 300); // Wait 300ms after user stops typing
 });
+
+// --- Global Keyboard Shortcuts ---
+window.addEventListener('keydown', (e) => {
+    // 1. Press "/" to open search
+    if (e.key === '/' && document.activeElement !== searchInput) {
+        e.preventDefault(); // Prevent the "/" from being typed into the box
+        document.getElementById('overlay').style.display = 'flex';
+        searchInput.focus();
+    }
+
+    // 2. Press "Escape" to close search/overlay
+    if (e.key === 'Escape') {
+        document.getElementById('overlay').style.display = 'none';
+        searchInput.blur(); // Remove focus from the input
+    }
+});    
 
 function renderResults(features) {
     resultsContainer.innerHTML = '';
