@@ -74,27 +74,72 @@ button:hover { background: rgba(0,255,255,0.4); }
 
 #overlay {
     position: absolute; 
-    top: 0; 
-    left: 0; 
-    width: 100%; 
-    height: 100%;
-    background: rgba(0, 0, 0, 0.85);
+    top: 0; left: 0; 
+    width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.9);
     display: none; 
     flex-direction: column;
     align-items: center; 
-    justify-content: center;
+    justify-content: flex-start;
+    padding-top: 10vh;
     z-index: 100; 
-    
-    /* ADD THIS LINE BELOW */
     box-sizing: border-box; 
-    
-    border: 10px solid #00ff00; /* Increased thickness for a cool "HUD" look */
-    pointer-events: auto; /* Ensures you can click the button */
+    border: 10px solid #00ff00;
+    pointer-events: auto;
+    gap: 20px; /* This creates the gap between ALL elements (h1, p, search, button) */
 }
-#overlay h1 { color: #00ff00; font-size: 3rem; text-shadow: 0 0 20px #00ff00; margin-bottom: 10px; }
-#overlay p { color: #ffffff; font-size: 1.2rem; margin-bottom: 20px; }
-#overlay button { padding: 15px 40px; font-size: 1.2rem; background: #00ff00; color: #000; border: none; cursor: pointer; }
-#overlay button:hover { background: #008800; color: #fff; }    
+
+#searchWrapper {
+    width: 90%;
+    max-width: 500px;
+    position: relative; /* Absolute children like the icon will now stay inside here */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#searchIcon {
+    position: absolute;
+    left: 15px;
+    top: 25px; /* Centers it vertically relative to the input height */
+    font-size: 1.2rem;
+    color: #00ff00;
+    z-index: 2;
+    pointer-events: none;
+}
+
+#search {
+    width: 100%;
+    padding: 15px 15px 15px 45px; /* Added 45px left padding to make room for icon */
+    font-size: 1.2rem;
+    border: 2px solid #00ff00;
+    background: #000;
+    color: #00ff00;
+    text-transform: uppercase;
+    font-family: 'Segoe UI', sans-serif;
+    outline: none;
+    box-shadow: 0 0 15px rgba(0, 255, 0, 0.3);
+    box-sizing: border-box; /* Crucial for padding to work correctly */
+}
+
+#results {
+    width: 100%;
+    background: rgba(0, 10, 0, 0.98);
+    border: 2px solid #00ff00;
+    border-top: none;
+    max-height: 250px;
+    overflow-y: auto;
+    position: absolute;
+    top: 100%; 
+    z-index: 101;
+    box-sizing: border-box;
+}
+
+/* Ensure the button has its own margin just in case */
+#overlay button {
+    margin-top: 20px;
+}
+
 </style>
 </head>
 
@@ -102,6 +147,13 @@ button:hover { background: rgba(0,255,255,0.4); }
 <div id="overlay">
     <h1>MISSION COMPLETE</h1>
     <p>All targets identified. The grid is secured.</p>
+     <div id="searchWrapper">
+  <span id="searchIcon">🔍</span>
+  <input id="search" type="text" placeholder="Search and press Enter…" autocomplete="off">
+</div>
+
+
+  <div id="results"></div>
     <button onclick="resetGame()">REDEPLOY BLIMP</button>
 </div>
     
@@ -137,6 +189,84 @@ button:hover { background: rgba(0,255,255,0.4); }
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+// --- Search Logic ---
+const searchCache = {};
+const searchInput = document.getElementById('search');
+const resultsContainer = document.getElementById('results');
+
+async function photonSearch(query) {
+    if (query.length < 3) return [];
+    if (searchCache[query]) return searchCache[query];
+
+    try {
+        const res = await fetch(
+            `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=6`
+        );
+        const data = await res.json();
+        searchCache[query] = data.features || [];
+        return searchCache[query];
+    } catch (err) {
+        console.error("Search failed", err);
+        return [];
+    }
+}
+
+let searchTimeout;
+
+searchInput.addEventListener('input', (e) => {
+    const query = e.target.value;
+    
+    clearTimeout(searchTimeout);
+    
+    if (query.length < 3) {
+        resultsContainer.innerHTML = '';
+        return;
+    }
+
+    searchTimeout = setTimeout(async () => {
+        const features = await photonSearch(query);
+        renderResults(features);
+    }, 300); // Wait 300ms after user stops typing
+});
+
+function renderResults(features) {
+    resultsContainer.innerHTML = '';
+    features.forEach(feature => {
+        const div = document.createElement('div');
+        div.className = 'result';
+        // Get name and city/country for context
+        const name = feature.properties.name || '';
+        const city = feature.properties.city || feature.properties.country || '';
+        div.innerText = `${name}${city ? ', ' + city : ''}`;
+        
+        div.onclick = () => {
+            const [lon, lat] = feature.geometry.coordinates;
+            selectLocation(lat, lon);
+        };
+        resultsContainer.appendChild(div);
+    });
+}
+
+function selectLocation(lat, lon) {
+    console.log("Moving to:", lat, lon);
+    
+    // 1. Clear search UI
+    resultsContainer.innerHTML = '';
+    searchInput.value = '';
+    
+    // 2. Hide overlay
+    document.getElementById('overlay').style.display = 'none';
+    
+    // 3. Reset game state
+    blimpActive = true;
+    blimpSpeed = 1.5;
+    wanderAngle = 0;
+    velocity.set(0, 0, 1);
+    
+    // 4. Load the new map (Ensuring Lat comes first)
+    loadMap(lat, lon);
+}
+    
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight,1,15000);
 const renderer = new THREE.WebGLRenderer({antialias:true});
