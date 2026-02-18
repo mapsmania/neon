@@ -81,7 +81,7 @@ button:hover { background: rgba(0,255,255,0.4); }
     flex-direction: column;
     align-items: center; 
     justify-content: flex-start;
-    padding: 10vh 20px 40px 20px; /* Added bottom padding */
+    padding: 6vh 20px 40px 20px;
     z-index: 100; 
     box-sizing: border-box; 
     border: 10px solid #00ff00;
@@ -89,6 +89,20 @@ button:hover { background: rgba(0,255,255,0.4); }
     gap: 20px;
     overflow-y: auto; /* Allows the WHOLE overlay to scroll if results are long */
 }
+
+#overlay h1 {
+    margin: 0;
+    color: #00ff00;
+    font-size: 3rem;
+    text-align: center;
+}
+
+#overlay p {
+    margin: 0;
+    color: #88ff88;
+    text-align: center;
+}
+    
 
 #searchWrapper {
     width: 100%;
@@ -558,7 +572,7 @@ function createBlimp(){
     blimpMesh.add(gondola);
 
     searchlight=new THREE.SpotLight(0xffffff,0);
-    searchlight.angle=0.4;
+    searchlight.angle = 0.22;
     searchlight.penumbra=0.3;
     searchlight.decay=1.5;
     searchlight.distance=800;
@@ -632,47 +646,62 @@ if (viewMode === 'car') {
 
         // SEARCHLIGHT DETECTION
 if (isNight && targetBuildings.length) {
+
     const origin = searchlight.getWorldPosition(new THREE.Vector3());
-    const direction = new THREE.Vector3()
+    const forward = new THREE.Vector3()
         .subVectors(lightTarget.position, origin)
         .normalize();
 
-    raycaster.set(origin, direction);
-    const hits = raycaster.intersectObjects(targetBuildings, false);
+    const coneAngle = searchlight.angle;
+    const maxDistance = searchlight.distance;
 
-    hits.forEach(hit => {
-        const b = hit.object;
+    targetBuildings.forEach(b => {
 
-        if (!b.userData.found) {
+        if (b.userData.found) return;
+
+        // use building center
+        const center = new THREE.Vector3();
+        new THREE.Box3().setFromObject(b).getCenter(center);
+
+        const toBuilding = center.clone().sub(origin);
+        const distance = toBuilding.length();
+
+        if (distance > maxDistance) return;
+
+        const dir = toBuilding.normalize();
+
+        // angle between spotlight direction and building
+        const angle = Math.acos(forward.dot(dir));
+
+        if (angle < coneAngle) {
+
+            // FOUND!
             b.userData.found = true;
 
-            // CHANGE TO SOLID GREEN
-            b.material.color.set(0x00ff00); // Base color
-            b.material.emissive = new THREE.Color(0x00ff00); // Glow color
-            b.material.emissiveIntensity = 2; // Brightness
-            
-            // Update the wireframe to match
-            if(b.userData.targetOutline) {
+            b.material.color.set(0x00ff00);
+            b.material.emissive = new THREE.Color(0x00ff00);
+            b.material.emissiveIntensity = 2;
+
+            if (b.userData.targetOutline) {
                 b.userData.targetOutline.material.color.set(0x00ff00);
             }
 
-            // Speed Reward
             blimpSpeed = Math.min(blimpSpeed * 1.1, 10);
 
             const found = targetBuildings.filter(t => t.userData.found).length;
-            document.getElementById('counter').innerText = 
+            document.getElementById('counter').innerText =
                 `Targets Found: ${found} / ${targetBuildings.length}`;
 
-            // TRIGGER MISSION COMPLETE OVERLAY
             if (found === targetBuildings.length) {
                 setTimeout(() => {
                     document.getElementById('overlay').style.display = 'flex';
-                    blimpActive = false; // Stop movement
+                    blimpActive = false;
                 }, 500);
             }
         }
     });
 }
+
     }
 
     renderer.render(scene,camera);
