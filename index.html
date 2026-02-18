@@ -181,7 +181,27 @@ button:hover { background: rgba(0,255,255,0.4); }
     margin-top: 10px;
     flex-shrink: 0; /* Keeps the button from shrinking */
     padding: 15px 40px; /* Matches your previous button size */
-}    
+} 
+
+#radar{
+    position:absolute;
+    bottom:20px;
+    left:20px;
+
+    width:160px;
+    height:160px;
+
+    border-radius:50%;
+    background:rgba(0,20,30,.75);
+    border:2px solid #00ffff;
+
+    box-shadow:
+        0 0 20px rgba(0,255,255,.6),
+        inset 0 0 30px rgba(0,255,255,.25);
+
+    pointer-events:none;
+}
+    
 </style>
 </head>
 
@@ -198,7 +218,8 @@ button:hover { background: rgba(0,255,255,0.4); }
   <div id="results"></div>
     <button onclick="resetGame()">REDEPLOY BLIMP</button>
 </div>
-    
+<canvas id="radar"></canvas>
+
 <div id="ui">
     Hunt for Red Octangles
     <div class="controls">
@@ -345,6 +366,15 @@ let blimpMesh, searchlight, lightTarget, ambientLight, sunLight;
 let velocity=new THREE.Vector3(0,0,1), wanderAngle=0;
 let currentTarget=new THREE.Vector3(500,500,500);
 let blimpSpeed = 1.5; // default multiplier for movement
+
+const radar = document.getElementById('radar');
+const radarCtx = radar.getContext('2d');
+
+radar.width = 160;
+radar.height = 160;
+
+const RADAR_RANGE = 900; // meters in world space
+    
 
 const cruiseAlt=130;
 const keys={Left:false,Right:false};
@@ -703,7 +733,8 @@ if (isNight && targetBuildings.length) {
 }
 
     }
-
+    
+    if(isNight) drawRadar();
     renderer.render(scene,camera);
 }
 
@@ -783,6 +814,76 @@ navigator.geolocation.getCurrentPosition(
     p=>loadMap(p.coords.latitude,p.coords.longitude),
     ()=>loadMap(51.507,-0.127)
 );
+
+function drawRadar(){
+
+    radarCtx.clearRect(0,0,160,160);
+
+    const center = 80;
+
+    // outer circle
+    radarCtx.strokeStyle = "#00ffff";
+    radarCtx.lineWidth = 2;
+    radarCtx.beginPath();
+    radarCtx.arc(center,center,75,0,Math.PI*2);
+    radarCtx.stroke();
+
+    // sweep line
+    const sweepAngle = Date.now()*0.002 % (Math.PI*2);
+
+    radarCtx.strokeStyle="rgba(0,255,255,.35)";
+    radarCtx.beginPath();
+    radarCtx.moveTo(center,center);
+    radarCtx.lineTo(
+        center + Math.cos(sweepAngle)*75,
+        center + Math.sin(sweepAngle)*75
+    );
+    radarCtx.stroke();
+
+    if(!blimpMesh) return;
+
+    const blimpPos = blimpMesh.position;
+
+    // get blimp forward angle
+    const forward = velocity.clone().normalize();
+    const heading = Math.atan2(forward.x, forward.z);
+
+    targetBuildings.forEach(b=>{
+
+        if(b.userData.found) return;
+
+        const pos = new THREE.Vector3();
+        new THREE.Box3().setFromObject(b).getCenter(pos);
+
+        const dx = pos.x - blimpPos.x;
+        const dz = pos.z - blimpPos.z;
+
+        const dist = Math.sqrt(dx*dx + dz*dz);
+
+        if(dist > RADAR_RANGE) return;
+
+        // rotate relative to heading
+        const angle = Math.atan2(dx,dz) - heading;
+
+        const r = (dist / RADAR_RANGE) * 75;
+
+        const x = center - Math.sin(angle) * r;
+        const y = center - Math.cos(angle) * r;
+
+
+        radarCtx.fillStyle="#ff4444";
+        radarCtx.beginPath();
+        radarCtx.arc(x,y,4,0,Math.PI*2);
+        radarCtx.fill();
+    });
+
+    // blimp center dot
+    radarCtx.fillStyle="#00ffff";
+    radarCtx.beginPath();
+    radarCtx.arc(center,center,3,0,Math.PI*2);
+    radarCtx.fill();
+}
+    
 
 animate();
 
