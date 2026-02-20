@@ -145,7 +145,7 @@ async function loadMap(){
         mapObjects.remove(obj);
     }
 
-    const response = await fetch('./london.json');
+    const response = await fetch('.data/london.json');
     const data = await response.json();
 
     const nodes={};
