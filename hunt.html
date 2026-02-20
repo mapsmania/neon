@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Blimp Map Viewer</title>
+
+<style>
+body { margin:0; background:#010103; overflow:hidden; font-family:'Segoe UI',sans-serif; }
+
+#ui{
+    position:absolute;
+    top:20px;
+    left:20px;
+    color:#00ffff;
+    text-transform:uppercase;
+    letter-spacing:2px;
+    text-shadow:0 0 10px #00ffff;
+}
+
+.controls{
+    display:flex;
+    gap:10px;
+    margin-top:10px;
+}
+
+button{
+    background:rgba(0,255,255,0.1);
+    border:1px solid #00ffff;
+    color:#00ffff;
+    padding:10px;
+    cursor:pointer;
+    font-weight:bold;
+}
+
+button:hover{ background:rgba(0,255,255,0.4); }
+
+#loading{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    color:#00ffff;
+}
+</style>
+</head>
+<body>
+
+<div id="ui">
+    Blimp Map Viewer
+    <div class="controls">
+        <button id="viewBtn">Follow Blimp</button>
+        <button id="reloadBtn">Reload London</button>
+    </div>
+</div>
+
+<div id="loading">Loading map...</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://esm.sh/three@0.160.0",
+    "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const scene = new THREE.Scene();
+scene.background = null;
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 1, 15000);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+camera.position.set(600,600,600);
+
+let mapObjects = new THREE.Group();
+scene.add(mapObjects);
+
+let blimpMesh;
+let viewMode='drone';
+let velocity=new THREE.Vector3(0,0,1);
+let wanderAngle=0;
+let currentTarget=new THREE.Vector3();
+const cruiseAlt=130;
+const keys={Left:false,Right:false};
+
+scene.add(new THREE.AmbientLight(0xffffff,0.8));
+
+const sunLight=new THREE.DirectionalLight(0xffffff,1);
+sunLight.position.set(500,1000,500);
+scene.add(sunLight);
+
+/* ---------- MATERIALS ---------- */
+
+const buildingMaterial=new THREE.MeshStandardMaterial({
+    color:0x111122,
+    transparent:true,
+    opacity:0.6
+});
+
+const roadMaterial=new THREE.MeshStandardMaterial({
+    color:0x00f3ff,
+    emissive:0x0066ff,
+    emissiveIntensity:3
+});
+
+const blimpMaterial=new THREE.MeshStandardMaterial({
+    color:0x111111,
+    metalness:0.9,
+    roughness:0.2
+});
+
+/* -------------------------------- */
+
+window.addEventListener('keydown',(e)=>{
+    if(e.key==='ArrowLeft') keys.Left=true;
+    if(e.key==='ArrowRight') keys.Right=true;
+});
+
+window.addEventListener('keyup',(e)=>{
+    if(e.key==='ArrowLeft') keys.Left=false;
+    if(e.key==='ArrowRight') keys.Right=false;
+});
+
+function project(lon,lat,centerLon,centerLat){
+    return{
+        x:(lon-centerLon)*111320*Math.cos(centerLat*Math.PI/180),
+        z:(lat-centerLat)*110540*-1
+    };
+}
+
+async function loadMap(){
+
+    document.getElementById('loading').style.display='block';
+
+    while(mapObjects.children.length>0){
+        const obj=mapObjects.children[0];
+        if(obj.geometry) obj.geometry.dispose();
+        mapObjects.remove(obj);
+    }
+
+    const response = await fetch('./london.json');
+    const data = await response.json();
+
+    const nodes={};
+
+    data.elements
+        .filter(e=>e.type==='node')
+        .forEach(n=>nodes[n.id]={lat:n.lat,lon:n.lon});
+
+    const firstNode = Object.values(nodes)[0];
+    const centerLat = firstNode.lat;
+    const centerLon = firstNode.lon;
+
+    data.elements
+        .filter(e=>e.type==='way')
+        .forEach(way=>{
+
+            const points=way.nodes
+                .map(id=>nodes[id])
+                .filter(Boolean)
+                .map(n=>{
+                    const pos=project(n.lon,n.lat,centerLon,centerLat);
+                    return new THREE.Vector3(pos.x,0,pos.z);
+                });
+
+            if(points.length<2) return;
+
+            if(way.tags && way.tags.building){
+
+                const shape=new THREE.Shape(points.map(p=>new THREE.Vector2(p.x,p.z)));
+                const height=(way.tags["building:levels"]||5)*12;
+
+                const geometry=new THREE.ExtrudeGeometry(shape,{
+                    depth:height,
+                    bevelEnabled:false
+                });
+
+                const mesh=new THREE.Mesh(
+                    geometry,
+                    buildingMaterial.clone()
+                );
+
+                mesh.rotation.x=Math.PI/2;
+                mesh.position.y=height;
+
+                mesh.add(new THREE.LineSegments(
+                    new THREE.EdgesGeometry(geometry),
+                    new THREE.LineBasicMaterial({color:0x0088ff})
+                ));
+
+                mapObjects.add(mesh);
+
+            }else if(way.tags && way.tags.highway){
+
+                mapObjects.add(
+                    new THREE.Mesh(
+                        new THREE.TubeGeometry(
+                            new THREE.CatmullRomCurve3(points),
+                            20,1,8,false
+                        ),
+                        roadMaterial
+                    )
+                );
+            }
+        });
+
+    createBlimp();
+    blimpMesh.position.set(0,cruiseAlt,0);
+
+    document.getElementById('loading').style.display='none';
+}
+
+function createBlimp(){
+
+    if(blimpMesh) return;
+
+    blimpMesh=new THREE.Group();
+
+    const hullGeom=new THREE.SphereGeometry(12,32,32);
+    hullGeom.scale(0.8,0.8,1.8);
+
+    const hull=new THREE.Mesh(hullGeom,blimpMaterial);
+
+    hull.add(new THREE.LineSegments(
+        new THREE.EdgesGeometry(hullGeom),
+        new THREE.LineBasicMaterial({color:0xffff00})
+    ));
+
+    blimpMesh.add(hull);
+
+    const gondola=new THREE.Mesh(
+        new THREE.BoxGeometry(6,3,12),
+        blimpMaterial
+    );
+
+    gondola.position.y=-8;
+    blimpMesh.add(gondola);
+
+    scene.add(blimpMesh);
+}
+
+function animate(){
+    requestAnimationFrame(animate);
+
+    if(keys.Left) wanderAngle+=0.025;
+    if(keys.Right) wanderAngle-=0.025;
+
+    velocity.lerp(
+        new THREE.Vector3(Math.sin(wanderAngle),0,Math.cos(wanderAngle)),
+        0.05
+    );
+
+    if(blimpMesh){
+
+        blimpMesh.position.add(velocity.clone().multiplyScalar(1.5));
+        blimpMesh.lookAt(blimpMesh.position.clone().add(velocity));
+        blimpMesh.position.y=cruiseAlt+Math.sin(Date.now()*0.001)*8;
+
+        if(viewMode==='follow'){
+
+            const camOffset=velocity.clone().normalize().multiplyScalar(-250);
+            const camPos=blimpMesh.position.clone().add(camOffset);
+            camPos.y=cruiseAlt+120;
+
+            camera.position.lerp(camPos,0.05);
+            camera.lookAt(blimpMesh.position);
+
+        }else{
+
+            camera.position.lerp(currentTarget,0.01);
+
+            if (camera.position.distanceTo(currentTarget) < 50) {
+                currentTarget.set(
+                    camera.position.x + (Math.random()-0.5)*800,
+                    400 + Math.random()*400,
+                    camera.position.z + (Math.random()-0.5)*800
+                );
+            }
+
+            camera.lookAt(blimpMesh.position);
+        }
+    }
+
+    renderer.render(scene,camera);
+}
+
+document.getElementById('viewBtn').addEventListener('click',(e)=>{
+
+    if(viewMode === 'follow'){
+        viewMode = 'drone';
+        currentTarget.copy(camera.position);
+        e.target.innerText = 'Follow Blimp';
+    } else {
+        viewMode = 'follow';
+        e.target.innerText = 'Drone View';
+    }
+});
+
+document.getElementById('reloadBtn')
+    .addEventListener('click',()=>loadMap());
+
+loadMap();
+animate();
+
+</script>
+</body>
+</html>
