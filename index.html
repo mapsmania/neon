@@ -263,7 +263,7 @@ button:hover { background: rgba(0,255,255,0.4); }
 <div id="ui">
     Hunt for Red Octangles
     <div class="controls">
-        <button id="viewBtn">Follow Blimp</button>
+        <button id="viewBtn">Drone View</button>
         <button id="nycBtn">Jump to Manhattan</button>
     </div>
     <div id="counter">Targets Found: 0 / 0</div>
@@ -400,7 +400,7 @@ let targetBuildings=[];
 let mapObjects=new THREE.Group();
 scene.add(mapObjects);
 
-let viewMode='drone', isNight=false, blimpActive=false;
+let viewMode='car', isNight=false, blimpActive=false;
 let blimpMesh, searchlight, lightTarget, ambientLight, sunLight;
 
 let velocity=new THREE.Vector3(0,0,1), wanderAngle=0;
@@ -700,19 +700,26 @@ if (viewMode === 'car') {
 
 } else {
 
-    // Drone orbit camera
-    camera.position.lerp(currentTarget, 0.005);
-    camera.lookAt(0,0,0);
+    // Smooth outward movement
+    camera.position.lerp(currentTarget, 0.01);
 
-    if (camera.position.distanceTo(currentTarget) < 100) {
-        currentTarget.set(
-            (Math.random()-0.5)*1500,
-            600,
-            (Math.random()-0.5)*1500
+    // Always look at blimp instead of world origin
+    camera.lookAt(blimpMesh.position);
+
+    // When close to target, move further outward
+    if (camera.position.distanceTo(currentTarget) < 50) {
+
+        const dir = camera.position.clone()
+            .sub(blimpMesh.position)
+            .normalize();
+
+        currentTarget.copy(
+            blimpMesh.position.clone()
+                .add(dir.multiplyScalar(1500))
+                .setY(600)
         );
     }
 }
-
 
         // SEARCHLIGHT DETECTION
 if (isNight && targetBuildings.length) {
@@ -819,10 +826,26 @@ document.getElementById('modeBtn').addEventListener('click',(e)=>{
 });
 
 document.getElementById('viewBtn').addEventListener('click',(e)=>{
-    viewMode=(viewMode==='drone')?'car':'drone';
-    e.target.innerText=(viewMode==='drone')?"Follow Blimp":"Drone View";
-});
 
+    if(viewMode === 'car'){
+
+        viewMode = 'drone';
+        e.target.innerText = "Follow Blimp";
+
+        // Start drone movement from current camera position
+        currentTarget.copy(camera.position);
+
+        // Push target further in same direction to create smooth outward pan
+        const outward = camera.position.clone().normalize().multiplyScalar(800);
+        currentTarget.add(outward);
+
+    }else{
+
+        viewMode = 'car';
+        e.target.innerText = "Drone View";
+    }
+});
+    
 window.resetGame = function() {
     // 1. Hide the overlay
     document.getElementById('overlay').style.display = 'none';
