@@ -452,16 +452,25 @@ sunLight=new THREE.DirectionalLight(0xffffff,1.0);
 sunLight.position.set(500,1000,500);
 scene.add(sunLight);
 
-window.addEventListener('keydown',(e)=>{
-    if(e.key==='ArrowLeft') keys.Left=true;
-    if(e.key==='ArrowRight') keys.Right=true;
+window.addEventListener('keydown', (e) => {
+    const key = e.key.toLowerCase();
+
+    if (key === 'arrowleft' || key === 'a')
+        keys.Left = true;
+
+    if (key === 'arrowright' || key === 'd')
+        keys.Right = true;
 });
 
-window.addEventListener('keyup',(e)=>{
-    if(e.key==='ArrowLeft') keys.Left=false;
-    if(e.key==='ArrowRight') keys.Right=false;
-});
+window.addEventListener('keyup', (e) => {
+    const key = e.key.toLowerCase();
 
+    if (key === 'arrowleft' || key === 'a')
+        keys.Left = false;
+
+    if (key === 'arrowright' || key === 'd')
+        keys.Right = false;
+});
 function project(lon,lat,centerLon,centerLat){
     return{
         x:(lon-centerLon)*111320*Math.cos(centerLat*Math.PI/180),
